@@ -4,6 +4,8 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import sqlite3
+import numpy as np
 
 def collect_results(results_root: Path) -> pd.DataFrame:
     rows = []
@@ -18,24 +20,31 @@ def collect_results(results_root: Path) -> pd.DataFrame:
                     "run": int(run_json.stem.split("_")[-1]),
                     "best_value": data["best_value"],
                     "elapsed": data["elapsed"],
-                    "point": data["best_solution_dec"],
+                    "point": json.dumps(data["best_solution_dec"]),
                 }
             )
             run_json.unlink()
     return pd.DataFrame(rows)
 
 def save_summary(df: pd.DataFrame, out_dir: Path):
-    df.to_csv(out_dir / "summary.csv", index=False)
-
+    db_path = out_dir / "results.sqlite"
+    conn = sqlite3.connect(db_path)
+    
+    # Save raw data to SQLite
+    df.to_sql("raw_results", conn, if_exists="replace", index=False)
+    
     agg_val = df.groupby("config")["best_value"].agg(["mean", "std"])
     agg_time = df.groupby("config")["elapsed"].agg(["mean", "std"])
-
+    
     agg = pd.concat({"val": agg_val, "time": agg_time}, axis=1).reset_index()
     agg.columns = ["config", "val_mean", "val_std", "time_mean", "time_std"]
     agg = agg.sort_values("val_mean")
-
-    agg.to_csv(out_dir / "summary_stats.csv", index=False)
-
+    
+    # Save aggregated data to SQLite
+    agg.to_sql("stats_summary", conn, if_exists="replace", index=False)
+    
+    conn.close()
+    
     # Wykres 1: Średnia wartość f(x) z odchyleniem standardowym
     plt.figure(figsize=(max(20, len(agg) * 0.5), 6))
     bars = plt.bar(
